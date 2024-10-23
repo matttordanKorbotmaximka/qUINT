@@ -7,7 +7,7 @@
    		paypal.me/mcflypg
    		patreon.com/mcflypg
 
-    Simple Bloom
+    Screen-Space Reflections
     by Marty McFly / P.Gilcher
     part of qUINT shader library for ReShade 4
 
@@ -19,391 +19,429 @@
 	Preprocessor settings
 =============================================================================*/
 
-#ifndef SAMPLE_HIGH_QUALITY
- #define SAMPLE_HIGH_QUALITY 0
-#endif
 
 /*=============================================================================
 	UI Uniforms
 =============================================================================*/
 
-uniform float BLOOM_INTENSITY <
+uniform float SSR_FIELD_OF_VIEW <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 10.00;
-	ui_label = "Bloom Intensity";
-	ui_tooltip = "Scales bloom brightness.";
-> = 1.2;
+	ui_min = 0.00; ui_max = 100.00;
+	ui_label = "Vertical Field of View";
+	ui_tooltip = "Vertical FoV, should match camera FoV but since ReShade's\ndepth linearization is not always precise, this value\nmight differ from the actual value. Just set to what looks best.";
+	ui_category = "Global";
+> = 50.0;
 
-uniform float BLOOM_CURVE <
+uniform float SSR_REFLECTION_INTENSITY <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 10.00;
-	ui_label = "Bloom Curve";
-	ui_tooltip = "Higher values limit bloom to bright light sources only.";
-> = 1.5;
+	ui_min = 0.00; ui_max = 1.00;
+	ui_label = "Reflection Intensity";
+	ui_tooltip = "Amount of reflection.";
+	ui_category = "Global";
+> = 1.0;
 
-uniform float BLOOM_SAT <
+uniform float SSR_FRESNEL_EXP <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 5.00;
-	ui_label = "Bloom Saturation";
-	ui_tooltip = "Adjusts the color strength of the bloom effect";
-> = 2.0;
-/*
-uniform float BLOOM_DIRT <
+	ui_min = 1.00; ui_max = 10.00;
+	ui_label = "Reflection Exponent";
+	ui_tooltip = "qUINT uses Schlick's fresnel approximation.\nThis parameter represents the power of the angle falloff.\nHigher values restrict reflections to very flat angles.\nOriginal Schlick value: 5.\nThe Fresnel Coefficient is set to 0 to match most surfaces.";
+	ui_category = "Global";
+> = 5.0;
+
+uniform float SSR_FADE_DIST <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 2.00;
-	ui_label = "Lens Dirt Amount";
-	ui_tooltip = "Applies a dirt mask on top of the original bloom.";
-> = 0.0;
-*/
-uniform float BLOOM_LAYER_MULT_1 <
+	ui_min = 0.001; ui_max = 1.00;
+	ui_label = "Fade Distance";
+	ui_tooltip = "Distance where reflection is completely faded out.\n1 means infinite distance.";
+	ui_category = "Global";
+> = 0.8;
+
+uniform float SSR_RAY_INC <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 1.00;
-	ui_label = "Bloom Layer 1 Intensity";
-	ui_tooltip = "Intensity of this bloom layer. 1 is sharpest layer, 7 the most blurry.";
-> = 0.05;
-uniform float BLOOM_LAYER_MULT_2 <
+	ui_min = 1.01; ui_max = 3.00;
+	ui_label = "Ray Increment";
+	ui_tooltip = "Rate of ray step size growth.\nA parameter of 1.0 means same sized steps,\n2.0 means the step size doubles each iteration.\nIncrease if not the entire scene is represented (e.g. sky missing) at the cost of precision.";
+	ui_category = "Ray Tracing";
+> = 1.6;
+
+uniform float SSR_ACCEPT_RANGE <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 1.00;
-	ui_label = "Bloom Layer 2 Intensity";
-	ui_tooltip = "Intensity of this bloom layer. 1 is sharpest layer, 7 the most blurry.";
-> = 0.05;
-uniform float BLOOM_LAYER_MULT_3 <
+	ui_min = 0.0; ui_max = 12.00;
+	ui_label = "Acceptance Range";
+	ui_tooltip = "Acceptable error for ray intersection. Larger values will cause more coherent but incorrect reflections.";
+	ui_category = "Ray Tracing";
+> = 2.5;
+
+uniform float SSR_JITTER_AMOUNT <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 1.00;
-	ui_label = "Bloom Layer 3 Intensity";
-	ui_tooltip = "Intensity of this bloom layer. 1 is sharpest layer, 7 the most blurry.";
-> = 0.05;
-uniform float BLOOM_LAYER_MULT_4 <
+	ui_min = 0.0; ui_max = 1.00;
+	ui_label = "Ray Jitter Amount";
+	ui_tooltip = "Changes ray step size randomly per pixel to produce\na more coherent reflection at the cost of noise that needs to be filtered away.";
+	ui_category = "Ray Tracing";
+> = 0.25;
+
+uniform float SSR_FILTER_SIZE <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 1.00;
-	ui_label = "Bloom Layer 4 Intensity";
-	ui_tooltip = "Intensity of this bloom layer. 1 is sharpest layer, 7 the most blurry.";
-> = 0.1;
-uniform float BLOOM_LAYER_MULT_5 <
-	ui_type = "drag";
-	ui_min = 0.00; ui_max = 1.00;
-	ui_label = "Bloom Layer 5 Intensity";
-	ui_tooltip = "Intensity of this bloom layer. 1 is sharpest layer, 7 the most blurry.";
+	ui_min = 0.0; ui_max = 5.00;
+	ui_label = "Filter Kernel Size";
+	ui_tooltip = "Size of spatial filter, higher values create more blurry reflections at the cost of detail.";
+	ui_category = "Filtering and Details";
 > = 0.5;
-uniform float BLOOM_LAYER_MULT_6 <
+
+uniform float SSR_RELIEF_AMOUNT <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 1.00;
-	ui_label = "Bloom Layer 6 Intensity";
-	ui_tooltip = "Intensity of this bloom layer. 1 is sharpest layer, 7 the most blurry.";
-> = 0.01;
-uniform float BLOOM_LAYER_MULT_7 <
+	ui_min = 0.0; ui_max = 1.00;
+	ui_label = "Surface Relief Height";
+	ui_tooltip = "Strength of embossed texture relief. Higher values cause more bumpy surfaces.";
+	ui_category = "Filtering and Details";
+> = 0.05;
+
+uniform float SSR_RELIEF_SCALE <
 	ui_type = "drag";
-	ui_min = 0.00; ui_max = 1.00;
-	ui_label = "Bloom Layer 7 Intensity";
-	ui_tooltip = "Intensity of this bloom layer. 1 is sharpest layer, 7 the most blurry.";
-> = 0.01;
-uniform float BLOOM_ADAPT_STRENGTH <
-	ui_type = "drag";
-	ui_min = 0.00; ui_max = 1.00;
-	ui_label = "Bloom Scene Adaptation Sensitivity";
-	ui_tooltip = "Amount of adaptation applied, 0 means same exposure for all scenes, 1 means complete autoexposure.";
-> = 0.5;
-uniform float BLOOM_ADAPT_EXPOSURE <
-	ui_type = "drag";
-	ui_min = -5.00; ui_max = 5.00;
-	ui_label = "Bloom Scene Exposure Bias";
-	ui_tooltip = "qUINT bloom employs eye adaptation to tune bloom intensity for scene differences.\nThis parameter adjusts the final scene exposure.";
-> = 0.0;
-uniform float BLOOM_ADAPT_SPEED <
-	ui_type = "drag";
-	ui_min = 0.50; ui_max = 10.00;
-	ui_label = "Bloom Scene Adaptation Speed";
-	ui_tooltip = "Eye adaptation data is created by exponential moving average with last frame data.\nThis parameter controls the adjustment speed.\nHigher parameters let the image adjust more quickly.";
-> = 2.0;
-uniform bool BLOOM_ADAPT_MODE <
-    ui_label = "Adapt bloom only";
-> = false;
-uniform float BLOOM_TONEMAP_COMPRESSION <
-	ui_type = "drag";
-	ui_min = 0.00; ui_max = 10.00;
-	ui_label = "Bloom Tonemap Compression";
-	ui_tooltip = "Lower values compress a larger color range.";
-> = 4.0;
+	ui_min = 0.1; ui_max = 1.00;
+	ui_label = "Surface Relief Scale";
+	ui_tooltip = "Scale of embossed texture relief, lower values cause more high frequency relief.";
+	ui_category = "Filtering and Details";
+> = 0.35;
 
 /*=============================================================================
 	Textures, Samplers, Globals
 =============================================================================*/
 
-#define RESHADE_QUINT_COMMON_VERSION_REQUIRE 200
+#define RESHADE_QUINT_COMMON_VERSION_REQUIRE    202
+#define RESHADE_QUINT_EFFECT_DEPTH_REQUIRE      //effect requires depth access
 #include "qUINT_common.fxh"
 
-#define INT_LOG2(v)   (((v >> 1) != 0) + ((v >> 2) != 0) + ((v >> 3) != 0) + ((v >> 4) != 0) + ((v >> 5) != 0) + ((v >> 6) != 0) + ((v >> 7) != 0) + ((v >> 8) != 0) + ((v >> 9) != 0) + ((v >> 10) != 0) + ((v >> 11) != 0) + ((v >> 12) != 0) + ((v >> 13) != 0) + ((v >> 14) != 0) + ((v >> 15) != 0) + ((v >> 16) != 0))
+texture2D SSR_ColorTex 	{ Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA8; };
+sampler2D sSSR_ColorTex	{ Texture = SSR_ColorTex;	AddressU = MIRROR;};
 
-//static const int BloomTex7_LowestMip = int(log(BUFFER_HEIGHT/128) / log(2)) + 1;
-static const int BloomTex7_LowestMip = INT_LOG2(BUFFER_HEIGHT/128);
+texture2D CommonTex0 	{ Width = BUFFER_WIDTH;   Height = BUFFER_HEIGHT;   Format = RGBA8; };
+sampler2D sCommonTex0	{ Texture = CommonTex0;	};
 
-texture2D MXBLOOM_BloomTexSource 	{ Width = BUFFER_WIDTH/2; 	Height = BUFFER_HEIGHT/2;    Format = RGBA16F;};
-texture2D MXBLOOM_BloomTex1 		{ Width = BUFFER_WIDTH/2; 	Height = BUFFER_HEIGHT/2;    Format = RGBA16F;};
-texture2D MXBLOOM_BloomTex2			{ Width = BUFFER_WIDTH/4;  	Height = BUFFER_HEIGHT/4;    Format = RGBA16F;};
-texture2D MXBLOOM_BloomTex3 		{ Width = BUFFER_WIDTH/8;  	Height = BUFFER_HEIGHT/8;    Format = RGBA16F;};
-texture2D MXBLOOM_BloomTex4 		{ Width = BUFFER_WIDTH/16;  Height = BUFFER_HEIGHT/16;   Format = RGBA16F;};
-texture2D MXBLOOM_BloomTex5 		{ Width = BUFFER_WIDTH/32;  Height = BUFFER_HEIGHT/32;   Format = RGBA16F;};
-texture2D MXBLOOM_BloomTex6 		{ Width = BUFFER_WIDTH/64;  Height = BUFFER_HEIGHT/64;   Format = RGBA16F;};
-texture2D MXBLOOM_BloomTex7 		{ Width = BUFFER_WIDTH/128; Height = BUFFER_HEIGHT/128;  Format = RGBA16F; MipLevels = BloomTex7_LowestMip;};
-texture2D MXBLOOM_BloomTexAdapt		{ Format = R16F; };
+texture2D CommonTex1 	{ Width = BUFFER_WIDTH;   Height = BUFFER_HEIGHT;   Format = RGBA8; };
+sampler2D sCommonTex1	{ Texture = CommonTex1;	};
 
-sampler2D sMXBLOOM_BloomTexSource	{ Texture = MXBLOOM_BloomTexSource;	};
-sampler2D sMXBLOOM_BloomTex1		{ Texture = MXBLOOM_BloomTex1;		};
-sampler2D sMXBLOOM_BloomTex2		{ Texture = MXBLOOM_BloomTex2;		};
-sampler2D sMXBLOOM_BloomTex3		{ Texture = MXBLOOM_BloomTex3;		};
-sampler2D sMXBLOOM_BloomTex4		{ Texture = MXBLOOM_BloomTex4;		};
-sampler2D sMXBLOOM_BloomTex5		{ Texture = MXBLOOM_BloomTex5;		};
-sampler2D sMXBLOOM_BloomTex6		{ Texture = MXBLOOM_BloomTex6;		};
-sampler2D sMXBLOOM_BloomTex7		{ Texture = MXBLOOM_BloomTex7;		};
-sampler2D sMXBLOOM_BloomTexAdapt	{ Texture = MXBLOOM_BloomTexAdapt;	};
+/*=============================================================================
+	Vertex Shader
+=============================================================================*/
+
+struct SSR_VSOUT
+{
+	float4   vpos        : SV_Position;
+    float2   uv          : TEXCOORD0;
+    float3   uvtoviewADD : TEXCOORD4;
+    float3   uvtoviewMUL : TEXCOORD5;
+};
+
+SSR_VSOUT VS_SSR(in uint id : SV_VertexID)
+{
+    SSR_VSOUT o;
+    o.uv.x = (id == 2) ? 2.0 : 0.0;
+    o.uv.y = (id == 1) ? 2.0 : 0.0;       
+    o.vpos = float4(o.uv.xy * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    
+    //o.uvtoviewADD = float3(-1.0,-1.0,1.0);
+    //o.uvtoviewMUL = float3(2.0,2.0,0.0);
+
+    o.uvtoviewADD = float3(-tan(radians(SSR_FIELD_OF_VIEW * 0.5)).xx,1.0) * qUINT::ASPECT_RATIO.yxx;
+	o.uvtoviewMUL = float3(-2.0 * o.uvtoviewADD.xy,0.0);
+
+    return o;
+}
 
 /*=============================================================================
 	Functions
 =============================================================================*/
 
-float4 downsample(sampler2D tex, float2 tex_size, float2 uv)
+float3 get_position_from_uv(in float2 uv, in SSR_VSOUT i)
 {
-	float4 offset_uv = 0;
-
-	float2 kernel_small_offsets = float2(2.0,2.0) / tex_size;
-	float2 kernel_large_offsets = float2(4.0,4.0) / tex_size;
-
-	float4 kernel_center = tex2D(tex, uv);
-
-	float4 kernel_small = 0;
-
-	offset_uv.xy = uv + kernel_small_offsets;
-	kernel_small += tex2Dlod(tex, offset_uv); //++
-	offset_uv.x = uv.x - kernel_small_offsets.x;
-	kernel_small += tex2Dlod(tex, offset_uv); //-+
-	offset_uv.y = uv.y - kernel_small_offsets.y;
-	kernel_small += tex2Dlod(tex, offset_uv); //--
-	offset_uv.x = uv.x + kernel_small_offsets.x;
-	kernel_small += tex2Dlod(tex, offset_uv); //+-
-
-#if SAMPLE_HIGH_QUALITY == 0
-	return kernel_center / 5.0	
-	      + kernel_small / 5.0;
-#else
-	float4 kernel_large_1 = 0;
-
-	offset_uv.xy = uv + kernel_large_offsets;
-	kernel_large_1 += tex2Dlod(tex, offset_uv); //++
-	offset_uv.x = uv.x - kernel_large_offsets.x;
-	kernel_large_1 += tex2Dlod(tex, offset_uv); //-+
-	offset_uv.y = uv.y - kernel_large_offsets.y;
-	kernel_large_1 += tex2Dlod(tex, offset_uv); //--
-	offset_uv.x = uv.x + kernel_large_offsets.x;
-	kernel_large_1 += tex2Dlod(tex, offset_uv); //+-
-
-	float4 kernel_large_2 = 0;
-
-	offset_uv.xy = uv;
-	offset_uv.x += kernel_large_offsets.x;
-	kernel_large_2 += tex2Dlod(tex, offset_uv); //+0
-	offset_uv.x -= kernel_large_offsets.x * 2.0;
-	kernel_large_2 += tex2Dlod(tex, offset_uv); //-0
-	offset_uv.x = uv.x;
-	offset_uv.y += kernel_large_offsets.y;
-	kernel_large_2 += tex2Dlod(tex, offset_uv); //0+
-	offset_uv.y -= kernel_large_offsets.y * 2.0;
-	kernel_large_2 += tex2Dlod(tex, offset_uv); //0-
-
-	return kernel_center * 0.5 / 4.0		
-	     + kernel_small  * 0.5 / 4.0	
-	     + kernel_large_1 * 0.125 / 4.0
-	     + kernel_large_2 * 0.25 / 4.0;
-#endif
+    return (uv.xyx * i.uvtoviewMUL + i.uvtoviewADD) * qUINT::linear_depth(uv) * RESHADE_DEPTH_LINEARIZATION_FAR_PLANE;
 }
 
-float3 Upsample(sampler2D tex, float2 texel_size, float2 uv)
+float2 get_uv_from_position(in float3 pos, in SSR_VSOUT i)
 {
-	float4 offset_uv = 0;
+	return pos.xy / (i.uvtoviewMUL.xy * pos.z) - i.uvtoviewADD.xy/i.uvtoviewMUL.xy;
+}
 
-	float4 kernel_small_offsets;
-	kernel_small_offsets.xy = 1.5 * texel_size;
-	kernel_small_offsets.zw = kernel_small_offsets.xy * 2;
+float4 get_normal_and_edges_from_depth(in SSR_VSOUT i)
+{
+	float3 single_pixel_offset = float3(qUINT::PIXEL_SIZE, 0);
 
-	float3 kernel_center = tex2D(tex, uv).rgb;
+	float3 position              =              get_position_from_uv(i.uv, i);
+	float3 position_delta_x1 	 = - position + get_position_from_uv(i.uv + single_pixel_offset.xz, i);
+	float3 position_delta_x2 	 =   position - get_position_from_uv(i.uv - single_pixel_offset.xz, i);
+	float3 position_delta_y1 	 = - position + get_position_from_uv(i.uv + single_pixel_offset.zy, i);
+	float3 position_delta_y2 	 =   position - get_position_from_uv(i.uv - single_pixel_offset.zy, i);
 
-	float3 kernel_small_1 = 0;
+	position_delta_x1 = lerp(position_delta_x1, position_delta_x2, abs(position_delta_x1.z) > abs(position_delta_x2.z));
+	position_delta_y1 = lerp(position_delta_y1, position_delta_y2, abs(position_delta_y1.z) > abs(position_delta_y2.z));
 
-	offset_uv.xy = uv.xy - kernel_small_offsets.xy;
-	kernel_small_1 += tex2Dlod(tex, offset_uv).rgb; //--
-	offset_uv.x += kernel_small_offsets.z;
-	kernel_small_1 += tex2Dlod(tex, offset_uv).rgb; //+-
-	offset_uv.y += kernel_small_offsets.w;
-	kernel_small_1 += tex2Dlod(tex, offset_uv).rgb; //++
-	offset_uv.x -= kernel_small_offsets.z;
-	kernel_small_1 += tex2Dlod(tex, offset_uv).rgb; //-+
+	float deltaz = abs(position_delta_x1.z * position_delta_x1.z - position_delta_x2.z * position_delta_x2.z)
+				 + abs(position_delta_y1.z * position_delta_y1.z - position_delta_y2.z * position_delta_y2.z);
 
-#if SAMPLE_HIGH_QUALITY == 0
-	return kernel_center / 5.0
-	     + kernel_small_1 / 5.0;
-#else
-	float3 kernel_small_2 = 0;
+	return float4(normalize(cross(position_delta_y1, position_delta_x1)), deltaz);
+}
 
-	offset_uv.xy = uv.xy + float2(kernel_small_offsets.x, 0);
-	kernel_small_2 += tex2Dlod(tex, offset_uv).rgb; //+0
-	offset_uv.x -= kernel_small_offsets.z;
-	kernel_small_2 += tex2Dlod(tex, offset_uv).rgb; //-0
-	offset_uv.xy = uv.xy + float2(0, kernel_small_offsets.y);
-	kernel_small_2 += tex2Dlod(tex, offset_uv).rgb; //0+
-	offset_uv.y -= kernel_small_offsets.w;
-	kernel_small_2 += tex2Dlod(tex, offset_uv).rgb; //0-
+float3 get_normal_from_color(float2 uv, float2 offset, float scale, float sharpness)
+{
+	float3 offset_swiz = float3(offset.xy, 0);
+    float hpx = dot(tex2Dlod(qUINT::sBackBufferTex, float4(uv + offset_swiz.xz,0,0)).xyz, 0.333) * scale;
+    float hmx = dot(tex2Dlod(qUINT::sBackBufferTex, float4(uv - offset_swiz.xz,0,0)).xyz, 0.333) * scale;
+    float hpy = dot(tex2Dlod(qUINT::sBackBufferTex, float4(uv + offset_swiz.zy,0,0)).xyz, 0.333) * scale;
+    float hmy = dot(tex2Dlod(qUINT::sBackBufferTex, float4(uv - offset_swiz.zy,0,0)).xyz, 0.333) * scale;
 
-	return kernel_center * 4.0 / 16.0
-	     + kernel_small_1 * 1.0 / 16.0
-	     + kernel_small_2 * 2.0 / 16.0;
-#endif
+    float dpx = qUINT::linear_depth(uv + offset_swiz.xz);
+    float dmx = qUINT::linear_depth(uv - offset_swiz.xz);
+    float dpy = qUINT::linear_depth(uv + offset_swiz.zy);
+    float dmy = qUINT::linear_depth(uv - offset_swiz.zy);
+ 
+    float2 xymult = float2(abs(dmx - dpx), abs(dmy - dpy)) * sharpness;
+    xymult = saturate(1.0 - xymult);
+
+    float3 normal;
+    normal.xy = float2(hmx - hpx, hmy - hpy) * xymult / offset.xy * 0.5;
+    normal.z = 1.0;
+
+    return normalize(normal);       
+}
+ 
+float3 blend_normals(float3 n1, float3 n2)
+{
+    //return normalize(float3(n1.xy*n2.z + n2.xy*n1.z, n1.z*n2.z));
+    n1 += float3( 0, 0, 1);
+    n2 *= float3(-1, -1, 1);
+    return n1*dot(n1, n2)/n1.z - n2;
+}
+
+float bayer(float2 vpos, int max_level)
+{
+	float finalBayer   = 0.0;
+	float finalDivisor = 0.0;
+    float layerMult	   = 1.0;
+    
+  	for(float bayerLevel = max_level; bayerLevel >= 1.0; bayerLevel--)
+	{
+		layerMult 		   *= 4.0;
+
+		float2 bayercoord 	= floor(vpos.xy * exp2(1 - bayerLevel)) % 2;
+		float line0202 = bayercoord.x*2.0;
+
+		finalBayer += lerp(line0202, 3.0 - line0202, bayercoord.y) / 3.0 * layerMult;
+		finalDivisor += layerMult;
+	}
+
+	return finalBayer / finalDivisor;
 }
 
 /*=============================================================================
 	Pixel Shaders
 =============================================================================*/
 
-void PS_BloomPrepass(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 color : SV_Target0)
+struct Ray
 {
-	color = downsample(qUINT::sBackBufferTex, qUINT::SCREEN_SIZE, uv);
-	color.w = saturate(dot(color.rgb, 0.333));
+	float3 origin;
+	float3 dir;
+	float  step;
+	float3 pos;
+};
 
-	color.rgb = lerp(color.w, color.rgb, BLOOM_SAT);
-	color.rgb *= (pow(color.w, BLOOM_CURVE) * BLOOM_INTENSITY * BLOOM_INTENSITY * BLOOM_INTENSITY) / (color.w + 1e-3);
-}
-
-void PS_Downsample1(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = downsample(sMXBLOOM_BloomTexSource, ldexp(qUINT::SCREEN_SIZE, -1.0), uv);
-}
-void PS_Downsample2(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = downsample(sMXBLOOM_BloomTex1, 		ldexp(qUINT::SCREEN_SIZE, -2.0), uv);
-}
-void PS_Downsample3(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = downsample(sMXBLOOM_BloomTex2, 		ldexp(qUINT::SCREEN_SIZE, -3.0), uv);
-}
-void PS_Downsample4(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = downsample(sMXBLOOM_BloomTex3, 		ldexp(qUINT::SCREEN_SIZE, -4.0), uv);
-}
-void PS_Downsample5(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = downsample(sMXBLOOM_BloomTex4, 		ldexp(qUINT::SCREEN_SIZE, -5.0), uv);
-}
-void PS_Downsample6(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = downsample(sMXBLOOM_BloomTex5, 		ldexp(qUINT::SCREEN_SIZE, -6.0), uv);
-}
-void PS_Downsample7(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = downsample(sMXBLOOM_BloomTex6, 		ldexp(qUINT::SCREEN_SIZE, -7.0), uv); 
-	bloom.w = lerp(tex2D(sMXBLOOM_BloomTexAdapt, 0).x /*last*/, 
-				   bloom.w /*current*/, 
-				   saturate(qUINT::FRAME_TIME * 1e-3 * BLOOM_ADAPT_SPEED));
-}
-
-void PS_AdaptStoreLast(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float adapt : SV_Target0)
-{	adapt = tex2Dlod(sMXBLOOM_BloomTex7, float4(uv.xy,0,BloomTex7_LowestMip)).w;}
-
-void PS_Upsample1(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = float4(Upsample(sMXBLOOM_BloomTex7, ldexp(qUINT::PIXEL_SIZE, 7.0), uv) * BLOOM_LAYER_MULT_7, BLOOM_LAYER_MULT_6);}
-void PS_Upsample2(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = float4(Upsample(sMXBLOOM_BloomTex6, ldexp(qUINT::PIXEL_SIZE, 6.0), uv), BLOOM_LAYER_MULT_5);
-}
-void PS_Upsample3(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = float4(Upsample(sMXBLOOM_BloomTex5, ldexp(qUINT::PIXEL_SIZE, 5.0), uv), BLOOM_LAYER_MULT_4);
-}
-void PS_Upsample4(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = float4(Upsample(sMXBLOOM_BloomTex4, ldexp(qUINT::PIXEL_SIZE, 4.0), uv), BLOOM_LAYER_MULT_3);
-}
-void PS_Upsample5(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = float4(Upsample(sMXBLOOM_BloomTex3, ldexp(qUINT::PIXEL_SIZE, 3.0), uv), BLOOM_LAYER_MULT_2);
-}
-void PS_Upsample6(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 bloom : SV_Target0)
-{	
-	bloom = float4(Upsample(sMXBLOOM_BloomTex2, ldexp(qUINT::PIXEL_SIZE, 2.0), uv), BLOOM_LAYER_MULT_1);
-}
-
-void PS_Combine(in float4 pos : SV_Position, in float2 uv : TEXCOORD, out float4 color : SV_Target0)
+struct SceneData
 {
-	float3 bloom = Upsample(sMXBLOOM_BloomTex1, ldexp(qUINT::PIXEL_SIZE, 1.0), uv);
-	bloom /= dot(float4(BLOOM_LAYER_MULT_1, BLOOM_LAYER_MULT_2, BLOOM_LAYER_MULT_3, BLOOM_LAYER_MULT_4), 1) + dot(float3(BLOOM_LAYER_MULT_5, BLOOM_LAYER_MULT_6, BLOOM_LAYER_MULT_7), 1);
-	color = tex2D(qUINT::sBackBufferTex, uv);
-	
-	float adapt = tex2D(sMXBLOOM_BloomTexAdapt, 0).x + 1e-3; // we lerped to 0.5 earlier.
-	adapt *= 8;
+	float3 eyedir;
+	float3 normal;
+	float3 position;
+	float  depth;
+};
 
-	//based on suggestion by https://github.com/KarlRamstedt
-	if(BLOOM_ADAPT_MODE)
+struct TraceData
+{
+	int num_steps;
+	int num_refines;
+	float2 uv;
+	float3 error;
+	bool hit;
+};
+
+struct BlurData
+{
+	float4 key;
+	float4 mask;
+};
+
+void PS_PrepareColor(in SSR_VSOUT i, out float4 o : SV_Target0)
+{
+	o = tex2D(qUINT::sBackBufferTex, i.uv);
+}
+void PS_SSR(in SSR_VSOUT i, out float4 reflection : SV_Target0, out float4 blurbuffer : SV_Target1)
+{
+	blurbuffer 		= get_normal_and_edges_from_depth(i);
+	float jitter 	= bayer(i.vpos.xy,3) - 0.5;
+
+	SceneData scene;
+	scene.position = get_position_from_uv(i.uv, i);
+	scene.eyedir   = normalize(scene.position); //not the direction where the eye it but where it looks at
+	scene.normal   = blend_normals(blurbuffer.xyz, get_normal_from_color(i.uv, 40.0 * qUINT::PIXEL_SIZE / scene.position.z * SSR_RELIEF_SCALE, 0.005 * SSR_RELIEF_AMOUNT, 1000.0));
+	scene.depth    = scene.position.z / RESHADE_DEPTH_LINEARIZATION_FAR_PLANE;
+
+	Ray ray;
+	ray.origin = scene.position;
+	ray.dir = reflect(scene.eyedir, scene.normal);
+	ray.step = (0.2 + 0.05 * jitter * SSR_JITTER_AMOUNT) * sqrt(scene.depth) * rcp(1e-3 + saturate(1 - dot(ray.dir, scene.eyedir))); //<-ensure somewhat uniform step size in screen percentage
+	ray.pos = ray.origin + ray.dir * ray.step;
+
+	TraceData trace;
+	trace.uv = i.uv;
+	trace.hit = 0;
+	trace.num_steps = 20;
+	trace.num_refines = 3;
+
+	int j = 0;
+	int k = 0;
+	bool uv_inside_screen;
+
+	while(j++ < trace.num_steps)
 	{
-		bloom *= lerp(1, rcp(adapt), BLOOM_ADAPT_STRENGTH); 
-		bloom *= exp2(BLOOM_ADAPT_EXPOSURE);
-		color.rgb += bloom;
+		trace.uv =  get_uv_from_position(ray.pos, i);
+		trace.error = get_position_from_uv(trace.uv, i) - ray.pos;
+
+		if(trace.error.z < 0 && trace.error.z > -SSR_ACCEPT_RANGE * ray.step)
+		{
+			j = 0; //ensure we have enough steps left to complete our refinement
+
+			if(k < trace.num_refines)
+			{
+				//step back	
+				ray.step /= SSR_RAY_INC;
+				ray.pos -= ray.dir * ray.step; 
+				//decrease stepsize by magic amount - at some point the increased 
+				//resolution is too small to notice and just adds up to the render cost
+				ray.step *= SSR_RAY_INC * rcp(trace.num_steps);
+			}
+			else
+			{
+				j += trace.num_steps; //algebraic "break" - much faster
+			}
+			k++;	
+		}
+
+		ray.pos += ray.dir * ray.step;
+		ray.step *= SSR_RAY_INC;
+
+		uv_inside_screen = all(saturate(-trace.uv.y * trace.uv.y + trace.uv.y));
+		j += trace.num_steps * !uv_inside_screen;
 	}
-	else 
-	{
-		color.rgb += bloom;
-		color.rgb *= lerp(1, rcp(adapt), BLOOM_ADAPT_STRENGTH); 
-		color.rgb *= exp2(BLOOM_ADAPT_EXPOSURE);
-	}	
 
-	color.rgb = pow(max(0,color.rgb), BLOOM_TONEMAP_COMPRESSION);
-	color.rgb = color.rgb / (1.0 + color.rgb);
-	color.rgb = pow(color.rgb, 1.0 / BLOOM_TONEMAP_COMPRESSION);
+	trace.hit = k != 0;	//we did refinements -> we initially found an intersection
+
+	float SSR_FRESNEL_K = 0.04; //matches most surfaces
+	//Van Damme between physically correct and  total artistic nonsense
+	float schlick = lerp(SSR_FRESNEL_K, 1, pow(saturate(1 - dot(-scene.eyedir, scene.normal)), SSR_FRESNEL_EXP)) * SSR_REFLECTION_INTENSITY;
+	float fade 	  = saturate(dot(scene.eyedir, ray.dir)) * saturate(1 - dot(-scene.eyedir, scene.normal));
+
+	reflection.a   = trace.hit * schlick * fade;
+	reflection.rgb = tex2D(sSSR_ColorTex, trace.uv).rgb * reflection.a;
+
+	blurbuffer.xyz = blurbuffer.xyz * 0.5 + 0.5;
+}
+
+void spatial_blur_data(inout BlurData o, in sampler inputsampler, in float4 uv)
+{
+	o.key 	= tex2Dlod(inputsampler, uv);
+	o.mask 	= tex2Dlod(sCommonTex1, uv);
+	o.mask.xyz = o.mask.xyz * 2 - 1;
+}
+
+float compute_spatial_tap_weight(in BlurData center, in BlurData tap)
+{
+	float depth_term = saturate(1 - abs(tap.mask.w - center.mask.w) * 50);
+	float normal_term = saturate(dot(tap.mask.xyz, center.mask.xyz) * 50 - 49);
+	return depth_term * normal_term;
+}
+
+float4 blur_filter(in SSR_VSOUT i, in sampler inputsampler, in float radius, in float2 axis)
+{
+	float4 blur_uv = float4(i.uv.xy, 0, 0);
+
+    BlurData center, tap;
+	spatial_blur_data(center, inputsampler, blur_uv);
+
+	if(SSR_FILTER_SIZE == 0) return center.key;
+
+	float kernel_size = radius;
+	float k = -2.0 * rcp(kernel_size * kernel_size + 1e-3);
+
+	float4 blursum 					= 0;
+	float4 blursum_noweight 		= 0;
+	float blursum_weight 			= 1e-3;
+	float blursum_noweight_weight 	= 1e-3; //lel
+
+	[loop]
+	for(float j = -floor(kernel_size); j <= floor(kernel_size); j++)
+	{
+		spatial_blur_data(tap, inputsampler,  float4(i.uv + axis * (2.0 * j - 0.5), 0, 0));
+		float tap_weight = compute_spatial_tap_weight(center, tap);
+
+		blursum 			+= tap.key * tap_weight * exp(j * j * k) * tap.key.w;
+		blursum_weight 		+= tap_weight * exp(j * j * k) * tap.key.w;
+		blursum_noweight 			+= tap.key * exp(j * j * k) * tap.key.w;
+		blursum_noweight_weight 	+= exp(j * j * k) * tap.key.w;
+	}
+
+	blursum /= blursum_weight;
+	blursum_noweight /= blursum_noweight_weight;
+
+	return lerp(center.key, blursum, saturate(blursum_weight * 2));
+}
+
+void PS_FilterH(in SSR_VSOUT i, out float4 o : SV_Target0)
+{
+	o = blur_filter(i, sCommonTex0, SSR_FILTER_SIZE, float2(0, 1) * qUINT::PIXEL_SIZE);
+}
+
+void PS_FilterV(in SSR_VSOUT i, out float4 o : SV_Target0)
+{
+	float4 reflection = blur_filter(i, sSSR_ColorTex, SSR_FILTER_SIZE, float2(1, 0) * qUINT::PIXEL_SIZE);
+	float alpha = reflection.w; //tex2D(sCommonTex0, i.uv).w;
+
+	float fade = saturate(1 - qUINT::linear_depth(i.uv) / SSR_FADE_DIST);
+	o = tex2D(qUINT::sBackBufferTex, i.uv);
+
+	o.rgb = lerp(o.rgb, reflection.rgb, alpha * fade);
 }
 
 /*=============================================================================
 	Techniques
 =============================================================================*/
 
-technique Bloom
-< ui_tooltip = "                >> qUINT::Bloom <<\n\n"
-			   "Bloom is a shader that produces a glow around bright\n"
-               "light sources and other emitters on screen.\n"
-               "\nBloom is written by Marty McFly / Pascal Gilcher"; >
+technique SSR
+< ui_tooltip = "                      >> qUINT::SSR <<\n\n"
+			   "SSR adds screen-space reflections to the scene. This shader is\n"
+			   "intended to only be used in screenshots as it will add reflections\n"
+               "to _everything_ - ReShade limitation.\n"
+               "\nSSR is written by Marty McFly / Pascal Gilcher"; >
 {
+	pass
+	{
+		VertexShader = VS_SSR;
+		PixelShader  = PS_PrepareColor;
+		RenderTarget = SSR_ColorTex;
+	}
     pass
 	{
-		VertexShader = PostProcessVS;
-		PixelShader  = PS_BloomPrepass;
-		RenderTarget0 = MXBLOOM_BloomTexSource;
+		VertexShader = VS_SSR;
+		PixelShader  = PS_SSR;
+		RenderTarget0 = CommonTex0;
+		RenderTarget1 = CommonTex1;
 	}
-
-	#define PASS_DOWNSAMPLE(i) pass { VertexShader = PostProcessVS; PixelShader  = PS_Downsample##i; RenderTarget0 = MXBLOOM_BloomTex##i; }
-
-	PASS_DOWNSAMPLE(1)
-	PASS_DOWNSAMPLE(2)
-	PASS_DOWNSAMPLE(3)
-	PASS_DOWNSAMPLE(4)
-	PASS_DOWNSAMPLE(5)
-	PASS_DOWNSAMPLE(6)
-	PASS_DOWNSAMPLE(7)
-
 	pass
 	{
-		VertexShader = PostProcessVS;
-		PixelShader  = PS_AdaptStoreLast;
-		RenderTarget0 = MXBLOOM_BloomTexAdapt;
+		VertexShader = VS_SSR;
+		PixelShader  = PS_FilterH;
+		RenderTarget = SSR_ColorTex;
 	}
-
-	#define PASS_UPSAMPLE(i,j) pass {VertexShader = PostProcessVS;PixelShader  = PS_Upsample##i;RenderTarget0 = MXBLOOM_BloomTex##j;ClearRenderTargets = false;BlendEnable = true;BlendOp = ADD;SrcBlend = ONE;DestBlend = SRCALPHA;}
-
-	PASS_UPSAMPLE(1,6)
-	PASS_UPSAMPLE(2,5)
-	PASS_UPSAMPLE(3,4)
-	PASS_UPSAMPLE(4,3)
-	PASS_UPSAMPLE(5,2)
-	PASS_UPSAMPLE(6,1)
-
 	pass
 	{
-		VertexShader = PostProcessVS;
-		PixelShader  = PS_Combine;
+		VertexShader = VS_SSR;
+		PixelShader  = PS_FilterV;
 	}
 }
